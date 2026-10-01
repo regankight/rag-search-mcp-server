@@ -1,0 +1,13 @@
+Observability for a language model application means being able to see what
+actually happened inside a request after the fact, not just whether it
+succeeded. For a retrieval-augmented system, that includes which query was
+sent, which documents were retrieved and with what relevance scores,
+whether a reranking step changed their order, what context was finally
+assembled into the prompt, and how long each stage took. Recording this
+continuously, rather than only when something looks wrong, is what makes it
+possible to tell a retrieval problem apart from a generation problem later,
+and to notice quality drift before a user complains about it. Modern
+tooling increasingly structures this data as spans in a trace, following
+conventions originally built for distributed systems tracing, so that
+retrieval, reranking, and generation each show up as a clearly separated
+stage of the same request.

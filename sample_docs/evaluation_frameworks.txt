@@ -1,0 +1,13 @@
+Evaluating a retrieval system means measuring whether the documents it
+returns are actually the right ones, not just inspecting a few examples by
+eye. Standard metrics include recall at k, the fraction of known relevant
+documents that appear in the top k results, and mean reciprocal rank, which
+rewards relevant documents appearing earlier in the ranking. Normalized
+discounted cumulative gain extends this to graded relevance rather than a
+simple relevant-or-not judgment. Building a labeled evaluation set, where
+each query has known relevant documents attached, is usually the hardest
+and most valuable part of the process, since the scoring itself is
+mechanical once labels exist. Established open-source evaluation
+frameworks package these metrics together with dataset handling and
+reporting, which matters for comparability across projects and for
+catching regressions when a retrieval pipeline changes.

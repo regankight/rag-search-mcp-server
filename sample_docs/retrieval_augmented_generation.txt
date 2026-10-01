@@ -1,0 +1,12 @@
+Retrieval-augmented generation combines a search step with a language model's
+generation step. Instead of relying only on what a model learned during
+training, the system first retrieves relevant passages from an external
+corpus and then conditions the model's answer on that retrieved text. This
+keeps answers grounded in real source material, makes it possible to update
+the system's knowledge by changing the corpus rather than retraining the
+model, and lets the response cite exactly which passages it drew from. The
+retrieval step is usually built on vector embeddings and a similarity
+search, though keyword search and hybrid combinations of both are common
+too. The quality of the final answer is bounded by the quality of what gets
+retrieved: a strong language model given irrelevant context will still
+produce a weak or hallucinated answer.

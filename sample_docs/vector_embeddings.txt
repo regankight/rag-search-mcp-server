@@ -1,0 +1,11 @@
+A vector embedding represents a piece of text as a list of numbers, placed
+so that texts with similar meaning end up close together in that numeric
+space. A sentence embedding model produces one such vector per sentence or
+passage, trained so that semantically related passages have a small
+distance between their vectors even when they share few or no exact words.
+Cosine similarity, which measures the angle between two vectors rather than
+their raw distance, is the usual way to score how related two embeddings
+are, since it is unaffected by vector length. Embedding an entire document
+corpus once, ahead of time, turns search into a geometry problem: a new
+query is embedded the same way, and the documents whose vectors are
+closest to it are returned as the most relevant matches.

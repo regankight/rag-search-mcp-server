@@ -1,0 +1,12 @@
+Hybrid search combines two different ways of finding relevant documents:
+sparse keyword matching, such as BM25, and dense vector similarity from
+embeddings. Keyword search is strong at exact terms, rare names, and
+identifiers that an embedding model may represent poorly. Dense retrieval is
+strong at paraphrases, synonyms, and conceptual matches where no exact
+keyword overlaps. Because the two approaches make different kinds of
+mistakes, combining their ranked results often retrieves documents that
+either method alone would miss. Reciprocal rank fusion is a common way to
+merge the two ranked lists: each document gets a score based on its rank
+position in each list, and the combined score determines the final
+ordering. This avoids needing to calibrate the two systems' raw scores
+against each other, which are usually on very different numeric scales.

@@ -1,0 +1,4 @@
+mcp>=2,<3
+sentence-transformers
+numpy
+pytest  # for running tests/
