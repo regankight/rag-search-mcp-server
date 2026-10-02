@@ -1,39 +1,39 @@
 # RAG Search MCP Server
 
-A minimal [MCP](https://modelcontextprotocol.io) server that exposes semantic search over a local
-document corpus as a single tool an agent can call: `search_documents(query, top_k)`.
+A small [MCP](https://modelcontextprotocol.io) server with one tool, `search_documents(query, top_k)`,
+that lets an agent search a local set of text files by meaning.
 
-No external services, no API keys, no database. Clone it, install dependencies, point an MCP
-client at it, and it works immediately against the small bundled corpus.
+There are no external services, API keys, or databases. Clone it, install the dependencies, point an
+MCP client at it, and it works against the bundled sample corpus.
 
-## Why this project exists
+## Why I built it
 
-An agent is only as useful as the tools it can reach. This project demonstrates the other half of
-retrieval work — not building a RAG pipeline, but **exposing one as agent-callable infrastructure**
-via the protocol real agent clients (Claude Desktop, Claude Code, and others) actually speak.
+An agent can only use the tools it's given. I'd already built retrieval pipelines, so this project
+covers the other half: making retrieval something an agent can call, through the protocol agent
+clients (Claude Desktop, Claude Code, and others) already speak.
 
-It deliberately reuses retrieval logic already built and tested in
-[`pdf-rag-from-scratch`](https://github.com/regankight/pdf-rag-from-scratch) — tokenizer-aware
-chunking, local embeddings, cosine-similarity retrieval — rather than re-deriving it, and re-points
-it at a directory of plain-text files instead of a single PDF so the repo needs no external corpus
-supplied by whoever clones it.
+The search code comes from my [`pdf-rag-from-scratch`](https://github.com/regankight/pdf-rag-from-scratch)
+project: tokenizer-aware chunking, local embeddings, cosine-similarity ranking. I re-pointed it at a
+folder of `.txt` files instead of a PDF, so nobody has to supply their own corpus to try it.
 
 ## What it does
 
 ```text
 query
   ↓
-embed query (same model used to embed the corpus)
+embed the query (same model that embedded the corpus)
   ↓
 cosine similarity against every chunk
   ↓
-top_k chunks, ranked, each with its source file and score
+top_k chunks, best first, each with its source file and score
 ```
 
-One tool, one job: retrieval. It does not generate an answer — that's a deliberate scope boundary,
-not a missing feature (see [Design decisions](#design-decisions)).
+It only retrieves. It doesn't write an answer; that's the agent's job (see
+[Design decisions](#design-decisions)).
 
 ## Install and run
+
+Needs Python 3.10 or newer (the MCP SDK's minimum). I've only run it on 3.14.
 
 ```bash
 git clone https://github.com/regankight/rag-search-mcp-server.git
@@ -42,14 +42,14 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Run it directly (stdio transport — what MCP clients expect):
+Run it directly (MCP clients talk to it over stdio):
 
 ```bash
 python mcp_server.py
 ```
 
-To use it from an MCP client (e.g. Claude Desktop or Claude Code), point the client's MCP config at
-this command, e.g.:
+To use it from an MCP client such as Claude Desktop or Claude Code, point the client's config at that
+command:
 
 ```json
 {
@@ -62,16 +62,15 @@ this command, e.g.:
 }
 ```
 
-The first run downloads the embedding model (`all-MiniLM-L6-v2`, ~90MB) from Hugging Face and
-caches it locally. The server loads the model and builds the index in a background thread at
-startup, so it answers the client's handshake in a fraction of a second (about 0.3s on the
-machine this was built on) instead of waiting for the model; a search that arrives before the
-index is ready waits for it. Later runs start from the local cache.
+The first run downloads the embedding model (`all-MiniLM-L6-v2`, about 90MB) from Hugging Face and
+caches it. The server loads the model and builds the index in a background thread as soon as it
+starts, so it answers the client's handshake in about 0.3 seconds instead of waiting for the model.
+A search that arrives before the index is ready waits for it.
 
 ## Example
 
-Asking an MCP-connected agent to search for *"catching quality getting worse over time before users
-complain"* returns (text shortened here):
+Searching for *"catching quality getting worse over time before users complain"* returns (text
+shortened):
 
 ```json
 [
@@ -90,105 +89,84 @@ complain"* returns (text shortened here):
 ]
 ```
 
-The observability passage ranks first by a wide margin. It talks about noticing "quality drift
-before a user complains" — the query and the passage share only a couple of generic words
-(`quality`, `before`); the match comes from meaning, not from the query's wording. (Numbers are from
-a real run against the bundled corpus; scores shift slightly with the embedding model.)
+The observability passage wins by a wide margin. It talks about noticing "quality drift before a user
+complains", and shares only two generic words with the query (`quality`, `before`), so the match comes
+from meaning, not wording. These numbers come from a real run on the bundled corpus; scores shift
+slightly with the embedding model.
 
 ## Design decisions
 
-### Why a bundled sample corpus instead of requiring the user's own documents
-An MCP server as a portfolio piece only proves something if a reviewer can actually run it. Making
-them supply their own PDF/corpus before they can see it work is friction that most people won't
-push through. `sample_docs/` ships five short, self-written passages on RAG-adjacent topics
-(retrieval, hybrid search, observability, evaluation, embeddings) specifically so the demo works
-out of the box — clone, install, run, query, see a correct result. Point `DEFAULT_DOCS_DIR` in
-`search.py` at any other directory of `.txt` files to search your own corpus instead.
+**Bundled sample corpus.** A server only proves something if a reviewer can run it. Asking them to
+bring their own documents first is friction most people won't push through. `sample_docs/` has five
+short passages on RAG-related topics (retrieval, hybrid search, observability, evaluation,
+embeddings) so a fresh clone gives a correct result straight away. To search your own files, point
+`DEFAULT_DOCS_DIR` in `search.py` at a directory of `.txt` files.
 
-### Why these are original, self-written sample documents, not a real dataset
-`pdf-rag-from-scratch`'s own benchmark PDF isn't committed there (`data/*.pdf` is gitignored), and
-its license for redistribution was never verified. Carrying it (or any
-other real corpus with unclear reuse rights) into a second public repo just to have a bigger demo
-corpus wasn't worth that risk for an artifact whose only job is to demonstrate that search works,
-not to search anything in particular.
+**Self-written samples, not a real dataset.** The benchmark PDF used in `pdf-rag-from-scratch` isn't
+committed there (`data/*.pdf` is gitignored), and its redistribution license was never checked. I
+wrote the samples myself instead of carrying content with unclear reuse rights into a second public
+repo. Their only job is to show that search works.
 
-### Why no generation step
-Adding an LLM call on top of retrieval would turn this into a second, smaller copy of
-`pdf-rag-from-scratch` rather than a distinct artifact. The point of *this* repo is specifically
-the MCP-exposure layer — giving an agent a callable search tool — not another retrieval pipeline.
-`pdf-rag-from-scratch` already covers retrieval-to-answer; this repo covers retrieval-as-a-tool.
+**Retrieval only, no generation.** Adding an LLM call would make this a smaller copy of
+`pdf-rag-from-scratch`. The point here is the MCP layer: giving an agent a search tool it can call.
 
-### Why an in-memory index instead of a vector database
-The corpus is five short files. A linear cosine-similarity scan over the resulting handful of
-chunks is simpler and faster than standing up a vector database for a dataset with no scaling
-problem to solve. The index builds once per server process and is kept in memory for the
-life of that process — reasonable for one corpus served to one client connection, which is
-the scope this project targets.
+**In-memory index, no vector database.** Five short files make a handful of chunks, so comparing the
+query against every chunk is simpler and fast enough. A vector database would solve a scaling problem
+this project doesn't have. The index is built once per server process and kept in memory.
 
-### Why the retrieval logic is copied, not imported, from `pdf-rag-from-scratch`
-Making this repo depend on another one (git submodule, `pip install` from a git URL) would mean a
-reviewer has to clone two repos just to run one. Copying the small amount of needed logic keeps
-this repo standalone and clone-and-run, at the cost of the two copies drifting if the original is
-later changed — an acceptable tradeoff for a demo-scale artifact, not something to do for
-production code shared across real services.
+**Copied search code, not imported.** Depending on `pdf-rag-from-scratch` (submodule, or `pip install`
+from a git URL) would mean cloning two repos to run one. Copying the small amount of code needed keeps
+this repo standalone. The cost is that the copies can drift apart, which is fine for a demo and not
+something I'd do for shared production code.
 
-### Why `mcp>=2,<3` is pinned, and why that matters here specifically
-The MCP Python SDK had a breaking change on 2026-07-28 (v2.0.0): the server class moved from
-`mcp.server.fastmcp.FastMCP` to `mcp.server.MCPServer`, with the old import path removed outright,
-not deprecated. Code written against the pre-July-2026 tutorials (`from mcp.server.fastmcp import
-FastMCP`) fails immediately on a fresh install with `ModuleNotFoundError` once `pip install mcp`
-resolves to 2.x. This repo targets the current v2 API (`from mcp.server import MCPServer`,
-`mcp.run(transport="stdio")` with an explicit transport) and pins accordingly, rather than silently
-breaking for the next person who clones it after the SDK moves again.
+**`mcp>=2,<3` is pinned.** The MCP Python SDK made a breaking change in v2.0.0 (2026-07-28): the server
+class moved from `mcp.server.fastmcp.FastMCP` to `mcp.server.MCPServer`, and the old import path was
+removed, not deprecated. Tutorials written before then fail on a fresh install with
+`ModuleNotFoundError`. This repo uses the v2 API (`from mcp.server import MCPServer`, with an explicit
+`mcp.run(transport="stdio")`) and pins the major version so it doesn't break the same way when the SDK
+changes again.
 
-### Why the index is built in a background thread, behind a lock
-Loading the model (and, on a first run, downloading it) takes seconds to tens of seconds. Even
-importing it is slow: `sentence-transformers` pulls in torch, about 2.5s on its own, so that import
-is deferred into the build as well (a test checks that importing the server never loads torch). Doing it
-inside the first tool call risks a client timeout on exactly the call a reviewer makes first; doing
-it before the server starts would delay the protocol handshake instead. So `python mcp_server.py`
-starts the build in a background thread and serves immediately. A search that arrives early waits
-on the same build. The lock exists because the MCP SDK runs sync tool functions on worker threads:
-without it, two searches arriving together would each load the model. A test starts eight threads
-at once and asserts the index is built exactly once. Importing the module builds nothing, so tests
-never trigger a download.
+**Index built in a background thread, behind a lock.** Loading the model takes seconds, and the first
+run also downloads it. Doing that inside the first tool call risks a client timeout on the call a
+reviewer is most likely to make first. Doing it before the server starts would delay the handshake. So
+`python mcp_server.py` starts the build in the background and serves immediately, and an early search
+waits on the same build. Even importing the embedding library is slow, because `sentence-transformers`
+pulls in torch (about 2.5s), so that import is deferred into the build too. A test checks that
+importing the server never loads torch. The lock is there because the SDK runs sync tool functions on
+worker threads: without it, two searches arriving together would each load the model. A test starts
+eight threads at once and asserts the index is built exactly once.
 
-### Why a blank query is an error, and what else the tool documents
-Embedding an empty or whitespace-only string still produces a vector, so every passage gets ranked
-and returned with a near-zero score that looks like a result but means nothing. The tool rejects it
-with a clear error instead. That error is raised as the SDK's `ToolError`: an ordinary exception
-is masked from the model (it would see only "Error executing tool search_documents"), so the reason
-wouldn't reach the agent. A test checks the message from the client's side over real stdio. The tool description also states the two behaviors a caller can't see
-from the schema: `top_k` is clamped to between 1 and the corpus size, and queries longer than the
-embedding model's 256-token limit are truncated.
+**Blank queries are an error.** Embedding an empty string still produces a vector, so every passage
+gets ranked and returned with a near-zero score that looks like a result but isn't one. The tool
+rejects blank queries instead. The error is raised as the SDK's `ToolError`, because an ordinary
+exception is hidden from the client (it would see only "Error executing tool search_documents"), and
+the agent wouldn't learn what to fix. A test checks the message from the client's side over real
+stdio. The tool description also states two behaviors the schema can't show: `top_k` is clamped to
+between 1 and the corpus size, and queries over the embedding model's 256-token limit are truncated.
 
-### Why each result carries its source file
-A passage with only a positional `chunk_id` can't be cited or checked — and a retrieval tool exists
-so an agent can ground an answer in something. Files are chunked separately (a chunk never spans
-two files), so each chunk maps to exactly one source filename, returned alongside the text.
+**Results include the source file.** A passage with only a positional `chunk_id` can't be cited or
+checked, and a retrieval tool exists so an agent can ground an answer in something. Files are chunked
+separately, so each chunk comes from exactly one file, and that filename is returned with the text.
 
-### Why `search()` is a plain function, separate from the `@mcp.tool()`-decorated one
-`mcp_server.search_documents` is a thin wrapper around `mcp_server.search()`. Testing against the
-decorated tool directly would couple the test suite to the MCP SDK's decorator internals; testing
-the plain function underneath doesn't. The decorator's only job is exposing `search()` over the
-protocol — correct by inspection, not something worth testing twice.
+**`search()` is separate from the decorated tool.** `search_documents` is a thin wrapper around
+`search()`. Tests call the plain function, so they don't depend on the SDK's decorator internals. The
+wrapper's only other job is converting a plain error into a `ToolError`.
 
-### Why three tiers of tests
-Fast tests use a stub model (fixed vectors keyed by exact text), so ranking, corpus loading, and
-the server's search logic run in milliseconds with no model load. Chunking tests use the real
-embedding model's tokenizer, because the chunker's whole job is to agree with that tokenizer's
-limits — a mock could pass while the real one still truncates. Two slower end-to-end tests build
-the index over the real bundled corpus and start the server as a subprocess, talking to it with an
-MCP client over real stdio — the tool-registration and protocol layer that the unit tests
-deliberately bypass, and the layer the SDK's July 2026 rename actually broke.
+**Three kinds of tests.** Fast tests use a stub model (fixed vectors keyed by exact text), so ranking,
+corpus loading, and the search logic run in milliseconds without loading a model. Chunking tests use
+the real embedding model's tokenizer, because the chunker has to agree with that tokenizer's limits
+and a mock could pass while the real one truncates. Slower end-to-end tests build the index over the
+real corpus and start the server as a subprocess, talking to it with an MCP client over real stdio.
+That covers tool registration and the protocol layer, which the unit tests skip and which the SDK's
+July 2026 rename actually broke.
 
 ## Project structure
 
 ```text
 rag-search-mcp-server/
-├── mcp_server.py      # the MCP server: index cache + the search_documents tool
-├── search.py           # chunking / embedding / cosine-similarity retrieval (adapted from pdf-rag-from-scratch)
-├── sample_docs/         # 5 short, self-written passages the demo searches by default
+├── mcp_server.py       # the MCP server: index cache and the search_documents tool
+├── search.py           # chunking, embedding, cosine-similarity ranking (adapted from pdf-rag-from-scratch)
+├── sample_docs/        # five short passages the demo searches by default
 ├── tests/
 │   └── test_search.py
 ├── requirements.txt
@@ -203,17 +181,8 @@ rag-search-mcp-server/
 pytest tests/ -v
 ```
 
-## What this project demonstrates
-
-- Building an MCP server against the current (post-2026-07-28) MCP Python SDK API
-- Exposing retrieval as an agent-callable tool, not just a pipeline stage
-- Reusing proven retrieval logic across projects without inter-repo coupling
-- Scoping a demo to be runnable with zero external setup
-- Testing tool logic independent of the protocol/decorator layer it's served through
-
 ## Scope
 
-This is a deliberately small, single-tool MCP server for demonstration purposes. It is not a
-general-purpose document-search service: no auth, no multi-corpus support, no persistence beyond
-the process lifetime, no concurrent-write handling. Adding those would solve problems this project
-doesn't have.
+This is a small, single-tool server meant to show how retrieval gets exposed to an agent. It isn't a
+general document-search service: no authentication, one fixed corpus directory, and the index lives
+only as long as the server process.
