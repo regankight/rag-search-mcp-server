@@ -75,7 +75,7 @@ returns:
   {
     "chunk_id": "chunk_0001",
     "text": "Hybrid search combines two different ways of finding relevant documents...",
-    "score": 0.62
+    "score": 0.5463
   }
 ]
 ```
