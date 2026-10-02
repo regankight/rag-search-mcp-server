@@ -27,7 +27,7 @@ embed query (same model used to embed the corpus)
   ↓
 cosine similarity against every chunk
   ↓
-top_k chunks, ranked, with scores
+top_k chunks, ranked, each with its source file and score
 ```
 
 One tool, one job: retrieval. It does not generate an answer — that's a deliberate scope boundary,
@@ -62,27 +62,37 @@ this command, e.g.:
 }
 ```
 
-The first call downloads the embedding model (`all-MiniLM-L6-v2`, ~90MB) from Hugging Face and
-caches it locally — that call will be slow; every call after is fast.
+The first run downloads the embedding model (`all-MiniLM-L6-v2`, ~90MB) from Hugging Face and
+caches it locally. The server loads the model and builds the index in a background thread at
+startup, so it answers the client's handshake immediately; a search that arrives before the index
+is ready waits for it. Later runs start from the local cache.
 
 ## Example
 
-Asking an MCP-connected agent to search for *"how does combining keyword and vector search work?"*
-returns:
+Asking an MCP-connected agent to search for *"catching quality getting worse over time before users
+complain"* returns (text shortened here):
 
 ```json
 [
   {
-    "chunk_id": "chunk_0001",
-    "text": "Hybrid search combines two different ways of finding relevant documents...",
-    "score": 0.5463
+    "chunk_id": "chunk_0002",
+    "source": "observability.txt",
+    "text": "Observability for a language model application means being able to see...",
+    "score": 0.3443
+  },
+  {
+    "chunk_id": "chunk_0000",
+    "source": "evaluation_frameworks.txt",
+    "text": "Evaluating a retrieval system means measuring whether the documents it...",
+    "score": 0.192
   }
 ]
 ```
 
-— correctly surfacing the hybrid-search document over the four other unrelated ones in the sample
-corpus, by meaning rather than keyword overlap (the query shares almost no exact words with the
-matched passage).
+The observability passage ranks first by a wide margin. It talks about noticing "quality drift
+before a user complains" — the query and the passage share only a couple of generic words
+(`quality`, `before`); the match comes from meaning, not from the query's wording. (Numbers are from
+a real run against the bundled corpus; scores shift slightly with the embedding model.)
 
 ## Design decisions
 
@@ -95,8 +105,8 @@ out of the box — clone, install, run, query, see a correct result. Point `DEFA
 `search.py` at any other directory of `.txt` files to search your own corpus instead.
 
 ### Why these are original, self-written sample documents, not a real dataset
-`pdf-rag-from-scratch`'s own benchmark PDF is gitignored there deliberately — its license for
-redistribution was never verified, so it was never committed to begin with. Carrying it (or any
+`pdf-rag-from-scratch`'s own benchmark PDF isn't committed there (`data/*.pdf` is gitignored), and
+its license for redistribution was never verified. Carrying it (or any
 other real corpus with unclear reuse rights) into a second public repo just to have a bigger demo
 corpus wasn't worth that risk for an artifact whose only job is to demonstrate that search works,
 not to search anything in particular.
@@ -107,11 +117,11 @@ Adding an LLM call on top of retrieval would turn this into a second, smaller co
 the MCP-exposure layer — giving an agent a callable search tool — not another retrieval pipeline.
 `pdf-rag-from-scratch` already covers retrieval-to-answer; this repo covers retrieval-as-a-tool.
 
-### Why a lazily-built, process-lifetime index instead of a vector database
+### Why an in-memory index instead of a vector database
 The corpus is five short files. A linear cosine-similarity scan over the resulting handful of
 chunks is simpler and faster than standing up a vector database for a dataset with no scaling
-problem to solve. The index builds once, on the first tool call, and is kept in memory for the
-life of the server process — reasonable for one corpus served to one client connection, which is
+problem to solve. The index builds once per server process and is kept in memory for the
+life of that process — reasonable for one corpus served to one client connection, which is
 the scope this project targets.
 
 ### Why the retrieval logic is copied, not imported, from `pdf-rag-from-scratch`
@@ -130,17 +140,35 @@ resolves to 2.x. This repo targets the current v2 API (`from mcp.server import M
 `mcp.run(transport="stdio")` with an explicit transport) and pins accordingly, rather than silently
 breaking for the next person who clones it after the SDK moves again.
 
+### Why the index is built in a background thread, behind a lock
+Loading the model (and, on a first run, downloading it) takes seconds to tens of seconds. Doing it
+inside the first tool call risks a client timeout on exactly the call a reviewer makes first; doing
+it before the server starts would delay the protocol handshake instead. So `python mcp_server.py`
+starts the build in a background thread and serves immediately. A search that arrives early waits
+on the same build. The lock exists because the MCP SDK runs sync tool functions on worker threads:
+without it, two searches arriving together would each load the model. A test starts eight threads
+at once and asserts the index is built exactly once. Importing the module builds nothing, so tests
+never trigger a download.
+
+### Why each result carries its source file
+A passage with only a positional `chunk_id` can't be cited or checked — and a retrieval tool exists
+so an agent can ground an answer in something. Files are chunked separately (a chunk never spans
+two files), so each chunk maps to exactly one source filename, returned alongside the text.
+
 ### Why `search()` is a plain function, separate from the `@mcp.tool()`-decorated one
 `mcp_server.search_documents` is a thin wrapper around `mcp_server.search()`. Testing against the
 decorated tool directly would couple the test suite to the MCP SDK's decorator internals; testing
 the plain function underneath doesn't. The decorator's only job is exposing `search()` over the
 protocol — correct by inspection, not something worth testing twice.
 
-### Why two tiers of tests
-Fast tests use a stub model (fixed vectors keyed by exact text) so ranking and formatting logic run
-in milliseconds with no model load. One slower test loads the real embedding model and the real
-bundled corpus and checks an actual query surfaces the right document — catching anything the stub
-can't, like a tokenizer edge case or the sample corpus failing to load.
+### Why three tiers of tests
+Fast tests use a stub model (fixed vectors keyed by exact text), so ranking, corpus loading, and
+the server's search logic run in milliseconds with no model load. Chunking tests use the real
+embedding model's tokenizer, because the chunker's whole job is to agree with that tokenizer's
+limits — a mock could pass while the real one still truncates. Two slower end-to-end tests build
+the index over the real bundled corpus and start the server as a subprocess, talking to it with an
+MCP client over real stdio — the tool-registration and protocol layer that the unit tests
+deliberately bypass, and the layer the SDK's July 2026 rename actually broke.
 
 ## Project structure
 

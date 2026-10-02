@@ -1,4 +1,4 @@
 mcp>=2,<3
-sentence-transformers
-numpy
+sentence-transformers>=6,<7
+numpy>=2,<3
 pytest  # for running tests/

@@ -12,6 +12,7 @@
 
 import os
 import re
+from typing import NamedTuple
 
 import numpy as np
 from sentence_transformers import SentenceTransformer
@@ -21,22 +22,39 @@ EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"  # small, fast, local — no API key
 DEFAULT_DOCS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sample_docs")
 
 
-def load_corpus_text(docs_dir):
+class Index(NamedTuple):
+    """Everything a search needs: chunk text, its embeddings, the model
+    that produced them, and which source file each chunk came from
+    (parallel to `chunks`)."""
+
+    chunks: list
+    embeddings: np.ndarray
+    model: SentenceTransformer
+    sources: list
+
+
+def load_corpus(docs_dir):
     """Read every .txt file in docs_dir, sorted for a deterministic chunk
-    order. Each file's content is joined with a blank-line separator so
-    chunking (which splits on blank lines) never merges two unrelated
-    source files into one paragraph."""
+    order. Returns [(filename, text), ...] — files stay separate (rather
+    than being joined into one string) so every chunk can be traced back
+    to the file it came from.
+
+    Single newlines inside a paragraph are collapsed to spaces, matching
+    what pdf-rag-from-scratch's PDF extractor did: hard-wrapped source
+    files would otherwise return passages with mid-sentence line breaks.
+    Blank lines (paragraph breaks) are preserved for the chunker."""
     if not os.path.isdir(docs_dir):
         raise FileNotFoundError(f"No such directory: {docs_dir}")
-    texts = []
+    docs = []
     for name in sorted(os.listdir(docs_dir)):
         if not name.endswith(".txt"):
             continue
         with open(os.path.join(docs_dir, name), "r", encoding="utf-8") as f:
-            texts.append(f.read().strip())
-    if not texts:
+            text = f.read().strip()
+        docs.append((name, re.sub(r"(?<!\n)\n(?!\n)", " ", text)))
+    if not docs:
         raise FileNotFoundError(f"No .txt files found in {docs_dir}")
-    return "\n\n".join(texts)
+    return docs
 
 
 def _find_words(para):
@@ -160,37 +178,56 @@ def format_chunk_id(index):
 
 
 def load_chunks(docs_dir, model, overlap_tokens=DEFAULT_OVERLAP_TOKENS):
-    """Load every .txt file in docs_dir and chunk it against a given
-    (already-loaded) embedding model's tokenizer and token budget."""
-    full_text = load_corpus_text(docs_dir)
+    """Load every .txt file in docs_dir and chunk each one against a given
+    (already-loaded) embedding model's tokenizer and token budget. Files
+    are chunked separately, so a chunk never spans two source files.
+    Returns (chunks, sources), parallel lists: sources[i] is the filename
+    chunks[i] came from."""
     max_content_tokens = compute_max_content_tokens(model)
-    return chunk_text(full_text, model.tokenizer, max_content_tokens, overlap_tokens)
+    chunks, sources = [], []
+    for name, text in load_corpus(docs_dir):
+        file_chunks = chunk_text(text, model.tokenizer, max_content_tokens, overlap_tokens)
+        chunks.extend(file_chunks)
+        sources.extend([name] * len(file_chunks))
+    return chunks, sources
 
 
 def build_index(docs_dir=DEFAULT_DOCS_DIR, overlap_tokens=DEFAULT_OVERLAP_TOKENS, embedding_model_name=EMBEDDING_MODEL_NAME):
     """Load chunks, verify each one actually fits the model, and embed
-    them. Returns (chunks, chunk_embeddings, model)."""
+    them. Returns an Index."""
     model = SentenceTransformer(embedding_model_name)
-    chunks = load_chunks(docs_dir, model, overlap_tokens)
+    chunks, sources = load_chunks(docs_dir, model, overlap_tokens)
     for chunk in chunks:
         validate_chunk_fits(chunk, model)
     chunk_embeddings = model.encode(chunks, show_progress_bar=False)
-    return chunks, chunk_embeddings, model
+    return Index(chunks, chunk_embeddings, model, sources)
 
 
-def cosine_similarity(vec_a, vec_b):
-    dot = np.dot(vec_a, vec_b)
-    norm_a = np.linalg.norm(vec_a)
-    norm_b = np.linalg.norm(vec_b)
-    return dot / (norm_a * norm_b)
+def rank_chunks(query, chunk_embeddings, model, top_n=5):
+    """Returns the top_n (chunk_index, cosine_score) pairs, best first.
+
+    Vectorized: one matrix-vector product over L2-normalized embeddings
+    instead of a Python loop recomputing every norm per chunk. A
+    zero-length vector scores 0.0 rather than producing NaN (which would
+    make the sort order undefined). Ties keep corpus order (stable sort).
+    Takes the model explicitly rather than reading a module-level global,
+    so callers (including tests) control which model a call runs against."""
+    embeddings = np.asarray(chunk_embeddings, dtype=float)
+    query_embedding = np.asarray(model.encode(query), dtype=float)
+
+    def unit(vectors):
+        norms = np.linalg.norm(vectors, axis=-1, keepdims=True)
+        return np.divide(vectors, norms, out=np.zeros_like(vectors), where=norms > 0)
+
+    scores = unit(embeddings) @ unit(query_embedding)
+    order = np.argsort(-scores, kind="stable")[:top_n]
+    return [(int(i), float(scores[i])) for i in order]
 
 
 def retrieve_top_chunks(query, chunks, chunk_embeddings, model, top_n=5):
     """Returns the top_n matches as (chunk_id, chunk_text, score) tuples,
-    ranked by cosine similarity descending. Takes model explicitly rather
-    than relying on a module-level global, so callers (including tests)
-    control which index/model a retrieval call runs against."""
-    query_embedding = model.encode(query)
-    scores = [cosine_similarity(query_embedding, emb) for emb in chunk_embeddings]
-    ranked = sorted(enumerate(zip(chunks, scores)), key=lambda x: x[1][1], reverse=True)
-    return [(format_chunk_id(idx), chunk, score) for idx, (chunk, score) in ranked[:top_n]]
+    ranked by cosine similarity descending."""
+    return [
+        (format_chunk_id(i), chunks[i], score)
+        for i, score in rank_chunks(query, chunk_embeddings, model, top_n)
+    ]
