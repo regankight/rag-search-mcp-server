@@ -4,10 +4,12 @@
 #
 # The index (embedding model + embedded chunks) is built once per process.
 # `python mcp_server.py` starts building it in a background thread right
-# away, so the server can answer the client's handshake immediately while
-# the model loads (the first run also downloads the model). A search that
-# arrives before the build finishes simply waits for it. Importing this
-# module (e.g. in tests) builds nothing and downloads nothing.
+# away, so the server can answer the client's handshake without waiting
+# for the model to load (the first run also downloads it). The heavy
+# import (torch, via sentence-transformers) is deferred into that thread
+# too. A search that arrives before the build finishes simply waits for
+# it. Importing this module (e.g. in tests) builds nothing, downloads
+# nothing, and doesn't import torch.
 #
 # Uses the MCP Python SDK's v2 API (mcp>=2,<3): the server class moved
 # from mcp.server.fastmcp.FastMCP to mcp.server.MCPServer in the SDK's
@@ -48,7 +50,11 @@ def search(query, top_k=5):
     """The actual search logic, kept as a plain function so it can be
     unit-tested directly without going through the MCP tool-call
     machinery. Returns a list of {chunk_id, source, text, score} dicts,
-    ranked by relevance descending."""
+    ranked by relevance descending. Raises ValueError for a blank query:
+    embedding an empty string still ranks every passage, and the near-zero
+    scores would look like (meaningless) hits to a caller."""
+    if not query.strip():
+        raise ValueError("query must not be empty or whitespace")
     index = get_index()
     top_k = max(1, min(top_k, len(index.chunks)))
     ranked = rank_chunks(query, index.embeddings, index.model, top_n=top_k)
@@ -69,7 +75,9 @@ def search_documents(query: str, top_k: int = 5) -> list[dict]:
     relevant passages, best first. Each result has the passage text, the
     source file it came from, and a cosine-similarity score (higher is
     more relevant; in practice roughly 0-1 for this model, though cosine
-    can range from -1 to 1). Use this to find passages that answer or
+    can range from -1 to 1). top_k is clamped to between 1 and the number
+    of passages in the corpus; queries longer than the embedding model's
+    256-token limit are truncated. Use this to find passages that answer or
     relate to a natural-language question — it does not generate an answer
     itself, only retrieves supporting text."""
     return search(query, top_k)

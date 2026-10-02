@@ -16,6 +16,7 @@
 import asyncio
 import json
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -299,6 +300,24 @@ def test_search_returns_at_least_one_result_for_top_k_below_one(monkeypatch):
     monkeypatch.setattr(mcp_server, "get_index", lambda: index)
 
     assert len(mcp_server.search("q", top_k=0)) == 1
+
+
+@pytest.mark.parametrize("blank", ["", "   ", "\n\t"])
+def test_search_rejects_blank_query(monkeypatch, blank):
+    # get_index must not even be reached: a blank query is rejected first.
+    monkeypatch.setattr(mcp_server, "get_index", lambda: pytest.fail("index touched for a blank query"))
+
+    with pytest.raises(ValueError, match="empty"):
+        mcp_server.search(blank)
+
+
+def test_importing_the_server_does_not_import_torch():
+    # The handshake can't wait on a ~2s torch import, so heavy imports must
+    # stay deferred into the background index build. Fresh interpreter so
+    # this process's own imports (the real-model fixtures) don't count.
+    code = "import sys; sys.path.insert(0, %r); import mcp_server; print('torch' in sys.modules)" % REPO_ROOT
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
+    assert out.stdout.strip() == "False"
 
 
 def test_get_index_builds_once_under_concurrent_first_calls(monkeypatch):

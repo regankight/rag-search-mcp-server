@@ -12,10 +12,15 @@
 
 import os
 import re
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 import numpy as np
-from sentence_transformers import SentenceTransformer
+
+if TYPE_CHECKING:
+    # Imported lazily in build_index(): sentence-transformers pulls in torch,
+    # which takes ~2s to import. Importing this module (and so starting the
+    # MCP server) shouldn't pay that before the protocol handshake.
+    from sentence_transformers import SentenceTransformer
 
 DEFAULT_OVERLAP_TOKENS = 50
 EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"  # small, fast, local — no API key
@@ -29,7 +34,7 @@ class Index(NamedTuple):
 
     chunks: list
     embeddings: np.ndarray
-    model: SentenceTransformer
+    model: "SentenceTransformer"
     sources: list
 
 
@@ -195,6 +200,8 @@ def load_chunks(docs_dir, model, overlap_tokens=DEFAULT_OVERLAP_TOKENS):
 def build_index(docs_dir=DEFAULT_DOCS_DIR, overlap_tokens=DEFAULT_OVERLAP_TOKENS, embedding_model_name=EMBEDDING_MODEL_NAME):
     """Load chunks, verify each one actually fits the model, and embed
     them. Returns an Index."""
+    from sentence_transformers import SentenceTransformer  # deferred, see top of file
+
     model = SentenceTransformer(embedding_model_name)
     chunks, sources = load_chunks(docs_dir, model, overlap_tokens)
     for chunk in chunks:

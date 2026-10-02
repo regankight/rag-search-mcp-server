@@ -64,8 +64,9 @@ this command, e.g.:
 
 The first run downloads the embedding model (`all-MiniLM-L6-v2`, ~90MB) from Hugging Face and
 caches it locally. The server loads the model and builds the index in a background thread at
-startup, so it answers the client's handshake immediately; a search that arrives before the index
-is ready waits for it. Later runs start from the local cache.
+startup, so it answers the client's handshake in a fraction of a second (about 0.3s on the
+machine this was built on) instead of waiting for the model; a search that arrives before the
+index is ready waits for it. Later runs start from the local cache.
 
 ## Example
 
@@ -141,7 +142,9 @@ resolves to 2.x. This repo targets the current v2 API (`from mcp.server import M
 breaking for the next person who clones it after the SDK moves again.
 
 ### Why the index is built in a background thread, behind a lock
-Loading the model (and, on a first run, downloading it) takes seconds to tens of seconds. Doing it
+Loading the model (and, on a first run, downloading it) takes seconds to tens of seconds. Even
+importing it is slow: `sentence-transformers` pulls in torch, about 2.5s on its own, so that import
+is deferred into the build as well (a test checks that importing the server never loads torch). Doing it
 inside the first tool call risks a client timeout on exactly the call a reviewer makes first; doing
 it before the server starts would delay the protocol handshake instead. So `python mcp_server.py`
 starts the build in a background thread and serves immediately. A search that arrives early waits
@@ -149,6 +152,13 @@ on the same build. The lock exists because the MCP SDK runs sync tool functions 
 without it, two searches arriving together would each load the model. A test starts eight threads
 at once and asserts the index is built exactly once. Importing the module builds nothing, so tests
 never trigger a download.
+
+### Why a blank query is an error, and what else the tool documents
+Embedding an empty or whitespace-only string still produces a vector, so every passage gets ranked
+and returned with a near-zero score that looks like a result but means nothing. The tool rejects it
+with a clear error instead. The tool description also states the two behaviors a caller can't see
+from the schema: `top_k` is clamped to between 1 and the corpus size, and queries longer than the
+embedding model's 256-token limit are truncated.
 
 ### Why each result carries its source file
 A passage with only a positional `chunk_id` can't be cited or checked — and a retrieval tool exists
