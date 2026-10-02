@@ -156,7 +156,9 @@ never trigger a download.
 ### Why a blank query is an error, and what else the tool documents
 Embedding an empty or whitespace-only string still produces a vector, so every passage gets ranked
 and returned with a near-zero score that looks like a result but means nothing. The tool rejects it
-with a clear error instead. The tool description also states the two behaviors a caller can't see
+with a clear error instead. That error is raised as the SDK's `ToolError`: an ordinary exception
+is masked from the model (it would see only "Error executing tool search_documents"), so the reason
+wouldn't reach the agent. A test checks the message from the client's side over real stdio. The tool description also states the two behaviors a caller can't see
 from the schema: `top_k` is clamped to between 1 and the corpus size, and queries longer than the
 embedding model's 256-token limit are truncated.
 

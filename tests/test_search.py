@@ -391,3 +391,26 @@ def test_server_works_over_real_stdio():
     assert len(hits) == 2
     assert hits[0]["source"] == "vector_embeddings.txt"
     assert set(hits[0]) == {"chunk_id", "source", "text", "score"}
+
+
+@pytest.mark.slow
+def test_blank_query_error_reaches_the_client_with_its_reason():
+    """The SDK masks ordinary exceptions (the model would only see "Error
+    executing tool search_documents"), so the reason has to travel as a
+    ToolError. Checked over real stdio, from the client's side."""
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.stdio import stdio_client
+
+    async def run():
+        params = StdioServerParameters(
+            command=sys.executable, args=[os.path.join(REPO_ROOT, "mcp_server.py")]
+        )
+        async with stdio_client(params) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                return await session.call_tool("search_documents", {"query": "   "})
+
+    result = asyncio.run(run())
+
+    assert result.is_error
+    assert "query must not be empty" in result.content[0].text

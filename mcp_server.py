@@ -20,6 +20,7 @@
 import threading
 
 from mcp.server import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 
 from search import DEFAULT_DOCS_DIR, build_index, rank_chunks, format_chunk_id
 
@@ -80,7 +81,12 @@ def search_documents(query: str, top_k: int = 5) -> list[dict]:
     256-token limit are truncated. Use this to find passages that answer or
     relate to a natural-language question — it does not generate an answer
     itself, only retrieves supporting text."""
-    return search(query, top_k)
+    try:
+        return search(query, top_k)
+    except ValueError as exc:
+        # The SDK hides ordinary exceptions from the model (it sees only
+        # "Error executing tool ..."); ToolError is how to say *why*.
+        raise ToolError(str(exc)) from exc
 
 
 if __name__ == "__main__":
