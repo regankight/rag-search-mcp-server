@@ -94,6 +94,13 @@ complains", and shares only two generic words with the query (`quality`, `before
 from meaning, not wording. These numbers come from a real run on the bundled corpus; scores shift
 slightly with the embedding model.
 
+### Called from Claude Code
+
+![Claude Code calling the search_documents tool over MCP and showing the raw result with source file and score](docs/img/claude-code-tool-call.png)
+
+Claude Code calls `search_documents` through the MCP server. The raw result includes the source
+file and score for each passage, and the answer is built from that passage.
+
 ## Design decisions
 
 **Bundled sample corpus.** A server only proves something if a reviewer can run it. Asking them to
