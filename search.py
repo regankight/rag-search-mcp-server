@@ -59,7 +59,20 @@ def load_corpus(docs_dir):
         docs.append((name, re.sub(r"(?<!\n)\n(?!\n)", " ", text)))
     if not docs:
         raise FileNotFoundError(f"No .txt files found in {docs_dir}")
+    if not any(text for _name, text in docs):
+        raise ValueError(f"Found {len(docs)} .txt file(s) in {docs_dir}, but all of them are empty")
     return docs
+
+
+def _check_overlap(max_content_tokens, overlap_tokens):
+    """The split loop advances by (max_content_tokens - overlap_tokens)
+    tokens per chunk, so the overlap must be smaller than the budget or the
+    loop never moves forward."""
+    if not 0 <= overlap_tokens < max_content_tokens:
+        raise ValueError(
+            f"overlap_tokens must be at least 0 and less than max_content_tokens "
+            f"({max_content_tokens}); got {overlap_tokens}"
+        )
 
 
 def _find_words(para):
@@ -77,6 +90,7 @@ def _split_oversized_paragraph(para, offsets, max_content_tokens, overlap_tokens
     pdf-rag-from-scratch/rag_project.py for the full rationale (this
     repo's sample_docs are short enough that this path is rarely
     exercised, but it stays in for correctness on larger corpora)."""
+    _check_overlap(max_content_tokens, overlap_tokens)
     words = _find_words(para)
 
     token_word_idx = []
@@ -139,6 +153,7 @@ def chunk_text(text, tokenizer, max_content_tokens, overlap_tokens):
     embedding model's own tokens, not words. A paragraph that fits is kept
     whole; an oversized one is split into overlapping, word-boundary-aligned
     windows."""
+    _check_overlap(max_content_tokens, overlap_tokens)
     paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
 
     chunks = []

@@ -149,6 +149,13 @@ def test_load_corpus_raises_on_missing_directory():
         load_corpus("/no/such/directory")
 
 
+def test_load_corpus_raises_when_every_txt_file_is_empty(tmp_path):
+    (tmp_path / "a.txt").write_text("")
+    (tmp_path / "b.txt").write_text("  \n\n ")
+    with pytest.raises(ValueError, match="all of them are empty"):
+        load_corpus(str(tmp_path))
+
+
 def test_load_corpus_raises_when_no_txt_files(tmp_path):
     (tmp_path / "readme.md").write_text("not a txt file")
     with pytest.raises(FileNotFoundError):
@@ -262,6 +269,17 @@ def test_single_giant_word_fallback_covers_the_whole_word():
     assert chunks == ["0123456789", "89abcdefgh", "ghijklmnop", "opqrst"]
 
 
+@pytest.mark.parametrize("overlap", [10, 11, -1])
+def test_overlap_must_be_smaller_than_budget(overlap):
+    # overlap >= budget used to loop forever; now it fails fast. No model needed.
+    para = "0123456789abcdefghijklmnopqrst"
+    offsets = [(i, i + 1) for i in range(30)]
+    with pytest.raises(ValueError, match="overlap_tokens"):
+        _split_oversized_paragraph(para, offsets, 10, overlap_tokens=overlap)
+    with pytest.raises(ValueError, match="overlap_tokens"):
+        chunk_text(para, tokenizer=None, max_content_tokens=10, overlap_tokens=overlap)
+
+
 def test_validate_chunk_fits_rejects_oversized_and_accepts_normal(model):
     validate_chunk_fits("A short chunk that comfortably fits the model.", model)
     with pytest.raises(ValueError):
@@ -342,6 +360,20 @@ def test_get_index_builds_once_under_concurrent_first_calls(monkeypatch):
     assert results == ["the-index"] * 8
 
 
+def test_get_index_tells_the_agent_why_the_build_failed(monkeypatch):
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    def failing_build(_docs_dir):
+        raise OSError("could not download all-MiniLM-L6-v2")
+
+    monkeypatch.setattr(mcp_server, "build_index", failing_build)
+    monkeypatch.setattr(mcp_server, "_index", None)
+
+    with pytest.raises(ToolError, match="OSError: could not download"):
+        mcp_server.get_index()
+    assert mcp_server._index is None  # nothing cached, so the next call retries
+
+
 # --- slow end-to-end: real model, real corpus, real stdio ----------------
 
 @pytest.mark.slow
@@ -387,6 +419,7 @@ def test_server_works_over_real_stdio():
 
     assert [t.name for t in tools] == ["search_documents"]
     assert tools[0].input_schema["required"] == ["query"]
+    assert not result.is_error, result.content[0].text
     hits = [json.loads(c.text) for c in result.content]
     assert len(hits) == 2
     assert hits[0]["source"] == "vector_embeddings.txt"

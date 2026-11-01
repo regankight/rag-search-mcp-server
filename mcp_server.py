@@ -43,7 +43,13 @@ def get_index():
     if _index is None:
         with _index_lock:
             if _index is None:
-                _index = build_index(DEFAULT_DOCS_DIR)
+                try:
+                    _index = build_index(DEFAULT_DOCS_DIR)
+                except Exception as exc:
+                    # Without this, a failed model download or a bad docs
+                    # folder reaches the agent as just "Error executing
+                    # tool". The cache stays empty, so the next call retries.
+                    raise ToolError(f"Could not build the search index: {type(exc).__name__}: {exc}") from exc
     return _index
 
 
