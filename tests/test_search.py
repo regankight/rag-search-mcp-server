@@ -447,3 +447,22 @@ def test_blank_query_error_reaches_the_client_with_its_reason():
 
     assert result.is_error
     assert "query must not be empty" in result.content[0].text
+
+
+def test_build_index_checks_the_corpus_before_loading_the_model(tmp_path, monkeypatch):
+    # A bad docs folder must fail fast, without importing or loading the embedding model.
+    import builtins
+
+    real_import = builtins.__import__
+
+    def no_model(name, *args, **kwargs):
+        if name == "sentence_transformers":
+            pytest.fail("model loaded before the corpus was checked")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", no_model)
+    (tmp_path / "empty.txt").write_text("")
+    with pytest.raises(ValueError, match="all of them are empty"):
+        build_index(str(tmp_path))
+    with pytest.raises(FileNotFoundError):
+        build_index(str(tmp_path / "missing"))
