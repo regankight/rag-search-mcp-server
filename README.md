@@ -1,5 +1,7 @@
 # RAG Search MCP Server
 
+[![tests](https://github.com/regankight/rag-search-mcp-server/actions/workflows/tests.yml/badge.svg)](https://github.com/regankight/rag-search-mcp-server/actions/workflows/tests.yml)
+
 A small [MCP](https://modelcontextprotocol.io) server with one tool, `search_documents(query, top_k)`,
 that lets an agent search a local set of text files by meaning.
 
