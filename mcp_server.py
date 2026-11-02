@@ -17,6 +17,7 @@
 # matters and what breaks on the wrong version.
 # ============================================================
 
+import sys
 import threading
 
 from mcp.server import MCPServer
@@ -95,8 +96,16 @@ def search_documents(query: str, top_k: int = 5) -> list[dict]:
         raise ToolError(str(exc)) from exc
 
 
+def _warm_index():
+    """Build the index in the background at startup. A failure is reported in
+    one line on stderr (never stdout, which carries the MCP protocol); the next
+    search retries the build and returns the reason to the client."""
+    try:
+        get_index()
+    except ToolError as exc:
+        print(f"rag-search: {exc}", file=sys.stderr)
+
+
 if __name__ == "__main__":
-    # Warm the index in the background; errors surface on the next search
-    # (get_index retries) rather than killing the server.
-    threading.Thread(target=get_index, daemon=True).start()
+    threading.Thread(target=_warm_index, daemon=True).start()
     mcp.run(transport="stdio")

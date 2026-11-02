@@ -203,9 +203,14 @@ def load_chunks(docs_dir, model, overlap_tokens=DEFAULT_OVERLAP_TOKENS):
     are chunked separately, so a chunk never spans two source files.
     Returns (chunks, sources), parallel lists: sources[i] is the filename
     chunks[i] came from."""
+    return chunk_docs(load_corpus(docs_dir), model, overlap_tokens)
+
+
+def chunk_docs(docs, model, overlap_tokens=DEFAULT_OVERLAP_TOKENS):
+    """Chunk already-loaded (filename, text) pairs; see load_chunks."""
     max_content_tokens = compute_max_content_tokens(model)
     chunks, sources = [], []
-    for name, text in load_corpus(docs_dir):
+    for name, text in docs:
         file_chunks = chunk_text(text, model.tokenizer, max_content_tokens, overlap_tokens)
         chunks.extend(file_chunks)
         sources.extend([name] * len(file_chunks))
@@ -215,10 +220,14 @@ def load_chunks(docs_dir, model, overlap_tokens=DEFAULT_OVERLAP_TOKENS):
 def build_index(docs_dir=DEFAULT_DOCS_DIR, overlap_tokens=DEFAULT_OVERLAP_TOKENS, embedding_model_name=EMBEDDING_MODEL_NAME):
     """Load chunks, verify each one actually fits the model, and embed
     them. Returns an Index."""
+    # Read and check the corpus first: a missing, empty or .txt-less folder
+    # fails in milliseconds instead of after loading (or downloading) the model.
+    docs = load_corpus(docs_dir)
+
     from sentence_transformers import SentenceTransformer  # deferred, see top of file
 
     model = SentenceTransformer(embedding_model_name)
-    chunks, sources = load_chunks(docs_dir, model, overlap_tokens)
+    chunks, sources = chunk_docs(docs, model, overlap_tokens)
     for chunk in chunks:
         validate_chunk_fits(chunk, model)
     chunk_embeddings = model.encode(chunks, show_progress_bar=False)
